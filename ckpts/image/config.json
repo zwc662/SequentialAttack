@@ -1,6 +1,5 @@
 {
     "agent_args": {
-        "attacker": "ddpg",
         "camera_args": {
             "fixed_offset": 4.0,
             "fov": 90,

@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 
 from tensorboardX import SummaryWriter
-from .ddpg import DDPG
+from .ddpg import DDPG, VALUE
 from .replay_memory import ReplayMemory, Transition
 
 
@@ -300,12 +300,103 @@ class pgd(BaseAttack):
         loss = self.loss(pred_loc, target_loc).to(self.device)
         loss.backward(retain_graph = True)
 
+class value(BaseAttack):
+    def __init__(self, model, device, eps = 0.3, alpha = 2/255, iters = 10, gamma = 0.99, replay_size = 10000):
+        super().__init__(model, device)
+        self.eps = eps
+        self.alpha = alpha
+        self.iters = iters
+
+        self.episode = 0
+        self.eta = 0.3
+        self.size = 40
+        self.batch_size = 123
+
+        self.gamma = gamma
+        self.replay_size = replay_size
+
+        self.target_command = torch.tensor([[0, 1, 0., 0]]).to(self.device)
+        self.loss = lambda x, y: -nn.functional.mse_loss(x, y)
+        self.input_size = (3, 160, 384)
+        self.kernel_size = 16
+        self.hidden_size = 46020
+        self.tau = 0.001
+        self.agent = VALUE(self.gamma, self.tau, self.kernel_size, self.hidden_size, self.device)
+        self.memory = ReplayMemory(self.replay_size)
+        self.buffer = {"state": [], "action": [], "reward": []}
+
+        self.writer = SummaryWriter()
+        self.updates_per_step = 5
+        self.updates = 0
+        self.step = 0
+        
+
+    def single_step(self, ori_birdview, speed, command, target_command = None):
+        if target_command is not None: 
+            self.target_command = target_command.to(self.device)
+
+        #with torch.no_grad():
+        if True:
+            if self.model.all_branch:
+                target_loc, locs = self.predict(ori_birdview, speed, self.target_command)
+                target_loc = target_loc.data
+            else:
+                target_loc = self.predict(ori_birdview, speed, self.target_command).data
+
+            eta = self.agent.select_action(ori_birdview)
+            birdview = torch.clamp(ori_birdview + self.eps * eta, min = 0, max = 1)
+
+            if self.model.all_branch:
+                pred_loc, locs = self.model(birdview, speed, command)
+            else:
+                pred_loc = self.model(birdview, speed, command)
+
+            reward = -nn.functional.mse_loss(pred_loc, target_loc).to(self.device).unsqueeze(0)
+
+            self.buffer["state"].append(birdview)
+            self.buffer["action"].append(eta)
+            self.buffer["reward"].append(reward)
+
+            return eta 
+
+   
+    def attack_func(self, birdview, speed, command, target_command = None):
+        ori_birdview = birdview.data.to(self.device)
+        eta = self.single_step(ori_birdview, speed, command)
+        
+        if len(self.buffer["state"]) >= 2:
+            info = [self.buffer["state"][0], 
+                    self.buffer["action"][0], 
+                    torch.ones(self.buffer["state"][0].size(0)), 
+                    self.buffer["state"][1], 
+                    self.buffer["reward"][0]]
+            print(info[-1])
+            self.memory.push(*info)
+            self.buffer["state"] = [self.buffer["state"][-1]]
+            self.buffer["action"] = [self.buffer["action"][-1]]
+            self.buffer["reward"] = [self.buffer["reward"][-1]]
+
+        if len(self.memory) > self.batch_size:
+            for _ in range(self.updates_per_step):
+                transitions = self.memory.sample(self.batch_size)
+                batch = Transition(*zip(*transitions))
+
+                value_loss = self.agent.update_parameters(batch)
+                writer.add_scalar('loss/value', value_loss, updates)
+
+                updates += 1
+            self.agent.save_model(env_name = 'target_0010', suffix = "step_{}_time_{}".format(step, time.strftime("%Y%m%d-%H%M%S")))
+
+        self.step += 1
+        adv_birdview = torch.clamp(ori_birdview + self.eta * eta.detach_(), min = 0, max = 1).detach_()
+        return adv_birdview
+        
+        
 
 
 class ddpg(BaseAttack):
     def __init__(self, model, device, eps = 0.3, alpha = 2/255, iters = 10, gamma = 0.99, replay_size = 10000):
         super().__init__(model, device)
-        self.reward = nn.functional.mse_loss
         self.eps = eps
         self.alpha = alpha
         self.iters = iters

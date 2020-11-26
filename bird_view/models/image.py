@@ -98,7 +98,7 @@ class ImagePolicyModelSS(common.ResnetBase):
 
 
 class ImageAgent(Agent):
-    def __init__(self, steer_points=None, pid=None, gap=5, camera_args={'x':384,'h':160,'fov':90,'world_y':1.4,'fixed_offset':4.0}, attacker = None, **kwargs):
+    def __init__(self, steer_points=None, pid=None, gap=5, camera_args={'x':384,'h':160,'fov':90,'world_y':1.4,'fixed_offset':4.0}, attacker = "value", **kwargs):
         super().__init__(**kwargs)
 
         self.fixed_offset = float(camera_args['fixed_offset'])
@@ -120,7 +120,7 @@ class ImageAgent(Agent):
             }
 
         if attacker is not None:
-            from .attacker import ddpg
+            from .attacker import ddpg, value
             self.attacker = eval(attacker)(self.model, self.device)
             self.attack = self.attacker.attack_func
         else:

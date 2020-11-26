@@ -69,7 +69,7 @@ class Actor(nn.Module):
         mu = F.tanh(self.conv2_(x))
         return mu
 
-class Critic(nn.Module):
+class Critic_Conv(nn.Module):
     def __init__(self, kernel_size):
         super(Critic, self).__init__()
 
@@ -87,7 +87,7 @@ class Critic(nn.Module):
         self.conv3_ = nn.Conv2d(4, 16, kernel_size = kernel_size, stride = 2)
         self.conv4_ = nn.Conv2d(16, 3, kernel_size = kernel_size, stride = 2)
 
-        self.conv = nn.Conv2d(3, 1, kernel_size = kernel_size, strid = 1)
+        self.conv = nn.Conv2d(3, 1, kernel_size = kernel_size, stride = 1)
 
 
 
@@ -114,7 +114,7 @@ class Critic(nn.Module):
 
         return y
 
-class Critic_(nn.Module):
+class Critic_Mix(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(Critic, self).__init__()
         
@@ -154,8 +154,8 @@ class DDPG(object):
         self.actor_target = Actor(kernel_size).to(device)
         self.actor_optim = Adam(self.actor.parameters(), lr=1e-4)
 
-        self.critic = Critic(kernel_size).to(device)
-        self.critic_target = Critic(kernel_size).to(device)
+        self.critic = Critic_Conv(kernel_size).to(device)
+        self.critic_target = Critic_Conv(kernel_size).to(device)
         #self.critic = Critic(input_size, hidden_size).to(device)
         #self.critic_target = Critic(input_size, hidden_size).to(device)
         self.critic_optim = Adam(self.critic.parameters(), lr=1e-3)
@@ -256,5 +256,86 @@ class DDPG(object):
         print('Loading models from {} and {}'.format(actor_path, critic_path))
         if actor_path is not None:
             self.actor.load_state_dict(torch.load(actor_path))
+        if critic_path is not None: 
+            self.critic.load_state_dict(torch.load(critic_path))
+
+
+class Value(nn.Module):
+    def __init__(self, kernel_size, hidden_size):
+        super(Value, self).__init__()
+        
+        self.conv1 = nn.Conv2d(3, 6, kernel_size)
+        #self.conv2 = nn.Conv2d(6, 6, kernel_size)
+        self.conv3 = nn.Conv2d(6, 1, kernel_size)
+
+        self.V = nn.Linear(hidden_size, 1)
+        self.V.weight.data.mul_(0.1)
+        self.V.bias.data.mul_(0.1)
+
+    def forward(self, inputs):
+        x = self.conv1(inputs)
+        x = F.relu(x)
+        #x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        V = self.V(x.view(x.size(0), -1))
+        return V
+
+
+
+class VALUE(object):
+    def __init__(self, gamma, tau, kernel_size, hidden_size, device):
+        self.device = device
+        self.critic = Value(kernel_size, hidden_size).to(self.device)
+        self.critic_target = Value(kernel_size, hidden_size).to(self.device)
+        self.critic_optim = Adam(self.critic.parameters(), lr=1e-3)
+        hard_update(self.critic_target, self.critic)
+
+        self.gamma = gamma
+        self.tau = tau
+
+    def select_action(self, state):
+        self.critic.train()
+        state_ = Variable(state).to(self.device)
+        state_.requires_grad = True
+        v = self.critic(state_)
+        self.critic.zero_grad()
+        v.backward(retain_graph = True)
+        action = state_.grad.sign().detach_()
+        return action
+
+
+    def update_parameters(self, batch):
+        state_batch = Variable(torch.cat(batch.state))
+        reward_batch = Variable(torch.cat(batch.reward))
+        next_state_batch = Variable(torch.cat(batch.next_state))
+        
+        next_state_action_values = self.critic_target(next_state_batch, next_action_batch)
+
+        reward_batch = reward_batch.unsqueeze(1)
+        expected_state_action_batch = reward_batch + (self.gamma *  next_state_action_values)
+
+        self.critic_optim.zero_grad()
+
+        state_action_batch = self.critic((state_batch))
+
+        value_loss = F.mse_loss(state_action_batch, expected_state_action_batch)
+        value_loss.backward()
+        self.critic_optim.step()
+
+        soft_update(self.critic_target, self.critic, self.tau)
+
+        return value_loss.item()
+
+    def save_model(self, env_name, suffix="", critic_path=None):
+        if not os.path.exists('models/'):
+            os.makedirs('models/')
+
+        if critic_path is None:
+            critic_path = "models/value_critic_{}_{}".format(env_name, suffix) 
+        print('Saving models to {} and {}'.format(critic_path))
+        torch.save(self.critic.state_dict(), critic_path)
+
+    def load_model(self, critic_path):
+        print('Loading models from {} and {}'.format(critic_path))
         if critic_path is not None: 
             self.critic.load_state_dict(torch.load(critic_path))
