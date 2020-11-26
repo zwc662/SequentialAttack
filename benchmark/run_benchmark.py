@@ -210,7 +210,7 @@ def run_single(env, weather, start, target, agent_maker, seed, autopilot, show=F
     return result, diagnostics
 
 
-def run_benchmark(agent_maker, env, benchmark_dir, seed, autopilot, resume, max_run=5, show=False):
+def run_benchmark(agent_maker, env, benchmark_dir, seed, autopilot, resume, max_run=5,show=False):
     """
     benchmark_dir must be an instance of pathlib.Path
     """

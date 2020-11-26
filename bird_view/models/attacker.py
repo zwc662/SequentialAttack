@@ -319,7 +319,7 @@ class value(BaseAttack):
         self.loss = lambda x, y: -nn.functional.mse_loss(x, y)
         self.input_size = (3, 160, 384)
         self.kernel_size = 16
-        self.hidden_size = 46020
+        self.hidden_size = 53505
         self.tau = 0.001
         self.agent = VALUE(self.gamma, self.tau, self.kernel_size, self.hidden_size, self.device)
         self.memory = ReplayMemory(self.replay_size)
